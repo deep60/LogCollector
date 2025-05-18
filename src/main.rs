@@ -349,7 +349,19 @@ fn collect_syslog_tcp(
 
     while *running.lock().unwrap() {
         match listener.accept() {
-            Ok(())
+            Ok((stream, peer_addr)) => {
+                let processor_clone = processor.clone();
+                let source_name_clone = source_name.to_string();
+
+                thread::spawn(move || {
+                    handle_tcp_connection(stream, peer_addr, processor_clone, &source_name_clone);
+                });
+            }
+
+            Err(e) if e.kind = io::ErrorKind::WouldBlock => {
+                /// Timeout just continue the loop
+                continue;
+            }
         }
     }
 }
