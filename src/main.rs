@@ -1,21 +1,21 @@
 ///SIEM Log
 use std::error::Error;
 use std::fs::{self, File};
-use std::io::{self, BufRead, BufReader};
+use std::io::{self, BufRead, BufReader, Read};
 use std::net::{SocketAddr, UdpSocket, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration};
 use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
 
 /// Core log entry structure to normalize logs from different sources
-#[derive(Drbug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogEntry {
+    so    source_type: String,
     source_name: String,
-    source_name: String,
-    timestamp: DateTime<Utc>,
+mestamp: DateTime<Utc>,
     log_level: Option<String>,
     message: String,
     metadata: serde_json::Value,
@@ -178,13 +178,13 @@ impl LogCollector for SyslogTcpCollector {
         }
 
         *running = true;
-        let aadr = self.bind_addr;
+        let addr = self.bind_addr;
         let running_clone = self.running.clone();
         let processor = self.processor.clone();
         let source_name = self.source_name.clone();
 
         thread::spawn(move || {
-            if let Err(e) = collect_syslog_tcp(addr, running_close, processor, &source_name) {
+            if let Err(e) = collect_syslog_tcp(addr, running_clone, processor, &source_name) {
                 eprintln!("Error collecting logs from TCP syslog {}: {}", addr, e);
             }
         });
@@ -212,6 +212,14 @@ impl LogCollector for SyslogTcpCollector {
 
 /// HTTP Log collector (for API based collection)
 pub struct HttpLogCollector {
+    bind_addr: SocketAddr,
+    endpoint: String,
+    running: Arc<Mutex<bool>>,
+    processor: LogProcessorFn,
+    source_name: String,
+}
+
+impl HttpLogCollector {
     pub fn new(bind_addr: SocketAddr, endpoint: String, processor: LogProcessorFn) -> Self {
         HttpLogCollector {
             bind_addr,
@@ -231,15 +239,15 @@ impl LogCollector for HttpLogCollector {
         }
 
         *running = true;
-        let aadr = self.bind_addr;
+        let addr = self.bind_addr;
         let endpoint = self.endpoint.clone();
         let running_clone = self.running.clone(); 
         let processor = self.processor.clone();
         let source_name = self.source_name.clone();
         
         thread::spawn(move || {
-            if let Err(e) = collect_http_logs(addr, running_close, processor, &source_name) {
-                eprintln!("Error collecting logs from TCP syslog {}: {}", addr, e);
+            if let Err(e) = collect_http_logs(addr, endpoint.as_str(), running_clone, processor, &source_name) {
+                eprintln!("Error collecting logs from HTTP endpoint {}: {}", addr, e);
             }
         });
 
@@ -280,7 +288,7 @@ fn collect_file_logs(
         line.clear();
         match reader.read_line(&mut line) {
             Ok(0) => {
-                /// EOF reached
+                  // EOF reached
                 if !follow {
                     break;
                 }
@@ -335,7 +343,7 @@ fn collect_syslog_udp(
         match socket.recv_from(&mut buf) {
             Ok((size, peer_addr)) => {
                 if size > 0 {
-                    let message = String::from_utf8_lossy(&buf[0..sizee]).to_string();
+                    let message = String::from_utf8_lossy(&buf[0..size]).to_string();
 
                     let log_entry = LogEntry {
                         source_type: "syslog-udp".to_string(),
@@ -384,11 +392,11 @@ fn collect_syslog_tcp(
                 let source_name_clone = source_name.to_string();
 
                 thread::spawn(move || {
-                    handle_tcp_connection(stream, peer_addr, processor_clone, &source_name_clone);
+                    hadle_tcp_connection(stream, peer_addr, processor_clone, &source_name_clone);
                 });
             }
 
-            Err(e) if e.kind = io::ErrorKind::WouldBlock => {
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
                 /// No connection available, sleep a bit and try again
                 thread::sleep(Duration::from_millis(100));
             } 
@@ -416,7 +424,7 @@ fn hadle_tcp_connection(
         match line {
             Ok(message) => {
                 let log_entry = LogEntry {
-                    source: "syslog-tcp".to_string(),
+                    source_type: "syslog-tcp".to_string(),
                     source_name: source_name.to_string(),
                     timestamp: Utc::now(),
                     log_level: extract_log_level(&message),
@@ -456,7 +464,7 @@ fn collect_http_logs(
                 let enpoint_clone = endpoint.to_string();
 
                 thread::spawn(move || {
-                    handle_tcp_connection(stream, peer_addr, &endpoint_clone, processor_clone, &source_name_clone);
+                    handle_http_connection(stream, peer_addr, &enpoint_clone, processor_clone, &source_name_clone);
                 });
             }
 
@@ -491,7 +499,7 @@ fn handle_http_connection(
     }
 
     /// Very basic check for the endpoint
-    if !request_line.contains(endpoint) {
+    if !request_line.contains(&enpoint_clone) {
         return;
     }
 
@@ -503,7 +511,7 @@ fn handle_http_connection(
 
     /// Read the body
     let mut body = String::new();
-    if reader.read_to_string(&mut body).is_err {
+    if reader.read_to_string(&mut body).is_err() {
         return;
     }
 
@@ -532,9 +540,9 @@ pub struct WindowEventLogCollector {
     source_name: Stirng,
 }
 
-#[cfg(target_os = "window")]
-impl WindowEventLogCollector {
-    pub fn new(channel: Stirng, processor: LogProcessorFn) -> Self {
+#[cfg(target_os = "windows")]
+impl WindowsEventLogCollector {
+    pub fn new(channel: String, processor: LogProcessorFn) -> Self {
         WindowsEventLogCollector {
             channel: channel.clone(),
             running: Arc::new(Mutex::new(false)),
@@ -544,7 +552,7 @@ impl WindowEventLogCollector {
     }
 }
 
-#[cfg(target_os = "window")]
+#[cfg(target_os = "windows")]
 impl LogCollector for WindowsEventLogCollector {
     fn start_collection(&mut self) -> Result<(), Box<dyn Error>> {
         let mut running = self.running.lock().unwrap();
@@ -567,7 +575,7 @@ impl LogCollector for WindowsEventLogCollector {
         Ok(())
     }
 
-    fn stop_collections(&mut self) {
+    fn stop_collection(&mut self) {
         let mut running = self.running.lock().unwrap();
         *running = false;
     }
@@ -598,7 +606,7 @@ fn collect_windows_event_logs(
         /// Simulate reading a Window event
         let log_entry = LogEntry {
             source_type: "windows-event".to_string(),
-            source_name: source_name.to_strin(),
+            source_name: source_name.to_string(),
             timestamp: Utc::now(),
             log_level: Some("Information".to_string()),
             message: format!("Simulated Windows Event from channel {}", channel),
@@ -610,7 +618,7 @@ fn collect_windows_event_logs(
         };
         processor(log_entry);
 
-        thread::sleep(Duration::from_sec(5));
+        thread::sleep(Duration::from_secs(5));
     }
 
     Ok(())
@@ -643,7 +651,7 @@ pub struct LogCollectorManager {
 
 impl LogCollectorManager {
     pub fn new() -> Self {
-        LogCollectorManger {
+        LogCollectorManager {
             collectors: Vec::new(),
         }
     }
@@ -660,7 +668,7 @@ impl LogCollectorManager {
     }
 
     pub fn stop_all_collectors(&mut self) {
-        for collectors in &mut self.collectors {
+        for collector in &mut self.collectors {
             collector.stop_collection();
         }
     }
@@ -677,7 +685,7 @@ impl LogCollectorManager {
 /// Example usage function
 pub fn example_usage() {
     // Create a shared log processor function
-    let log_processor: LogProcessorFn = Arc::new(|log-entry| {
+    let log_processor: LogProcessorFn = Arc::new(|log_entry| {
         println!("[{}] [{}] {}: {}", 
             log_entry.timestamp.format("%Y-%m-%d %H:%M:%S"),
             log_entry.log_level.unwrap_or_else(|| "UNKNOWN".to_string()),
@@ -685,13 +693,13 @@ pub fn example_usage() {
             log_entry.message
             );
         ///In a real SIEM, you would send this log to next stage
-        /// for normalization, enrichment, and storage
+        // for normalization, enrichment, and storage
     });
 
     let mut manager = LogCollectorManager::new();
 
     /// Add a file log collector
-    manager.add_collector(Box::new(FileLogCollector::new(\
+    manager.add_collectors(Box::new(FileLogCollector::new(
                 "/var/log/auth.log",
                 true,  // follow the file 
                 log_processor.clone(),
@@ -700,7 +708,7 @@ pub fn example_usage() {
     /// Add a syslog UDP collector
     match "127.0.0.1:514".parse() {
         Ok(addr) => {
-            manager.add_collector(Box::new(SyslogUdpCollector::new(
+            manager.add_collectors(Box::new(SyslogUdpCollector::new(
                         addr, log_processor.clone(),
                     )));
         }
@@ -712,7 +720,7 @@ pub fn example_usage() {
     /// Add a syslog TCP collector
     match "127.0.0.1:1514".parse() {
         Ok(addr) => {
-            manager.add_collector(Box::new(SyslogTcpCollector::new(
+            manager.add_collectors(Box::new(SyslogTcpCollector::new(
                         addr, log_processor.clone(),
                     )));
         }
@@ -724,7 +732,7 @@ pub fn example_usage() {
     /// Add a syslog HTTP collector
     match "127.0.0.1:8080".parse() {
         Ok(addr) => {
-            manager.add_collector(Box::new(HTTPLogCollector::new(
+            manager.add_collectors(Box::new(HttpLogCollector::new(
                         addr, "/logs".to_string(), log_processor.clone(),
                     )));
         }
