@@ -1,6 +1,34 @@
+///SIEM Log
+use std::error::Error;
+use std::fs::{self, File};
+use std::io::{self, BufRead, BufReader};
+use std::net::{SocketAddr, UdpSocket, TcpListener, TcpStream};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::{Duration, SystemTime};
+use serde::{Deserialize, Serialize};
+use chrono::{DateTime, Utc};
+
+/// Core log entry structure to normalize logs from different sources
+#[derive(Drbug, Clone, Serialize, Deserialize)]
+pub struct LogEntry {
+    source_name: String,
+    source_name: String,
+    timestamp: DateTime<Utc>,
+    log_level: Option<String>,
+    message: String,
+    metadata: serde_json::Value,
+}
 
 // Trait defining behaviour for log source collectors
-pub trait LogCollector: Send {}
+pub trait LogCollector: Send {
+    fn start_collection(&mut self) -> Result<(), Box<dyn Error>>;
+    fn stop_collection(&mut self);
+    fn is_running(&self) -> bool;
+    fn source_name(&self) -> &str;
+    fn source_type(&self) -> &str;
+}
 
 // Log processor function type that will be called for each log entry
 type LogProcessorFn = Arc<dyn Fn(LogEntry) + Send + Sync>;
@@ -190,7 +218,7 @@ pub struct HttpLogCollector {
             endpoint,
             running: Arc::new(Mutex::new(false)),
             processor,
-            source_name: format!("http-{}{}", bind_addr, endpoint),
+            source_name: format!("http-{}: {}", bind_addr, endpoint),
         }
     }
 }
@@ -297,6 +325,7 @@ fn collect_syslog_udp(
     processor: LogProcessorFn,
     source_name: &str,
     ) -> Result<(), Box<dyn Error>> {
+
     let socket = UdpSocket::bind(addr)?;
     socket.set_read_timeout(Some(Duration::from_millis(500)))?;
 
@@ -344,6 +373,7 @@ fn collect_syslog_tcp(
     processor: LogProcessorFn,
     source_name: &str,
     ) -> Result<(), Box<dyn Error>> {
+
     let listener = TcpListener::bind(addr)?;
     listener.set_nonblocking(true)?;
 
