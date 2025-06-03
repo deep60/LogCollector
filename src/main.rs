@@ -702,13 +702,13 @@ pub fn example_usage() {
 
       // Add a file log collector
     manager.add_collectors(Box::new(FileLogCollector::new(
-                "/var/log/auth.log",
+                "test_logs.log",
                 true,  // follow the file 
                 log_processor.clone(),
             )));
 
       // Add a syslog UDP collector
-    match "127.0.0.1:514".parse() {
+    match "127.0.0.1:5140".parse() {
         Ok(addr) => {
             manager.add_collectors(Box::new(SyslogUdpCollector::new(
                         addr, log_processor.clone(),
@@ -720,7 +720,7 @@ pub fn example_usage() {
 
    
       // Add a syslog TCP collector
-    match "127.0.0.1:1514".parse() {
+    match "127.0.0.1:1515".parse() {
         Ok(addr) => {
             manager.add_collectors(Box::new(SyslogTcpCollector::new(
                         addr, log_processor.clone(),
@@ -732,7 +732,7 @@ pub fn example_usage() {
 
 
       // Add a syslog HTTP collector
-    match "127.0.0.1:8080".parse() {
+    match "127.0.0.1:8081".parse() {
         Ok(addr) => {
             manager.add_collectors(Box::new(HttpLogCollector::new(
                         addr, "/logs".to_string(), log_processor.clone(),
